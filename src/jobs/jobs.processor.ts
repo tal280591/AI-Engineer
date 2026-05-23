@@ -1,5 +1,5 @@
-import { Processor, Process } from '@nestjs/bull';
-import { Job as BullJob } from 'bull';
+import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job as BullJob } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Job } from './entities/job.entity';
@@ -7,15 +7,18 @@ import { Chunk } from './entities/chunk.entity';
 import { AiService } from '../ai/ai.service';
 
 @Processor('analysis')
-export class JobsProcessor {
+export class JobsProcessor extends WorkerHost {
   constructor(
     @InjectRepository(Job) private jobRepo: Repository<Job>,
     @InjectRepository(Chunk) private chunkRepo: Repository<Chunk>,
     private aiService: AiService,
-  ) {}
+  ) {
+    super();
+  }
 
-  @Process('analyze')
-  async handle(job: BullJob<{ jobId: string }>) {
+  async process(job: BullJob<{ jobId: string }>) {
+    if (job.name !== 'analyze') return;
+
     const jobEntity = await this.jobRepo.findOne({
       where: { id: job.data.jobId },
       relations: ['chunks'],
