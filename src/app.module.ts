@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { BullModule } from '@nestjs/bull';
+import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AiModule } from './ai/ai.module';
@@ -24,7 +24,7 @@ import { JobsModule } from './jobs/jobs.module';
     }),
 
     BullModule.forRoot({
-      redis: { host: 'localhost', port: 6379 },
+      connection: { host: 'localhost', port: 6379 },
     }),
 
     AiModule,
