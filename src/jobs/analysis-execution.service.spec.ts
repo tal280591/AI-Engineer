@@ -79,6 +79,41 @@ describe('AnalysisExecutionService', () => {
     expect(result.failedAt).toBeInstanceOf(Date);
   });
 
+  it('throws failed queued chunks back to BullMQ after persisting state', async () => {
+    const chunk = makeChunk({ status: 'pending', attempts: 0 });
+    chunkRepo.findOne.mockResolvedValue(chunk);
+    aiService.generate.mockRejectedValue(new Error('provider unavailable'));
+
+    await expect(service.processQueuedChunk(chunk.id)).rejects.toThrow(
+      'provider unavailable',
+    );
+
+    expect(chunk.status).toBe('failed');
+    expect(chunk.attempts).toBe(1);
+    expect(chunk.lastError).toBe('provider unavailable');
+  });
+
+  it('finalizes the parent job for a chunk queue event', async () => {
+    const job = makeJob({ id: 'job-for-chunk' });
+    const chunk = makeChunk({ id: 'chunk-for-event', job });
+    const completed = makeChunk({
+      index: 0,
+      status: 'completed',
+      summary: 'done',
+      inputTokens: 8,
+      outputTokens: 2,
+    });
+    const jobWithChunks = makeJob({ id: job.id, chunks: [completed] });
+    chunkRepo.findOne.mockResolvedValue(chunk);
+    jobRepo.findOne.mockResolvedValue(jobWithChunks);
+
+    const result = await service.finalizeJobForChunk(chunk.id);
+
+    expect(result.job.status).toBe('completed');
+    expect(result.job.totalInputTokens).toBe(8);
+    expect(result.job.totalOutputTokens).toBe(2);
+  });
+
   it('finalizes a job from chunk state without double-counting tokens', async () => {
     const completed = makeChunk({
       index: 0,
