@@ -14,12 +14,12 @@ describe('ChunksService', () => {
   beforeEach(() => {
     jobRepo = {
       findOne: jest.fn(),
-      save: jest.fn(async (job: Job) => job),
+      save: jest.fn((job: Job) => job),
     };
     chunkRepo = {
       find: jest.fn(),
       findOne: jest.fn(),
-      save: jest.fn(async (chunk: Chunk) => chunk),
+      save: jest.fn((chunk: Chunk) => chunk),
     };
     aiService = {
       generate: jest.fn(),

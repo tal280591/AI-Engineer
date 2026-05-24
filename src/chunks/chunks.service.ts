@@ -243,7 +243,9 @@ export class ChunksService {
     }
 
     const chunks = [...job.chunks].sort((a, b) => a.index - b.index);
-    const completedChunks = chunks.filter((chunk) => chunk.status === 'completed');
+    const completedChunks = chunks.filter(
+      (chunk) => chunk.status === 'completed',
+    );
     const failedChunks = chunks.filter((chunk) => chunk.status === 'failed');
     const hasRetryableFailures = failedChunks.some(
       (chunk) => chunk.attempts < chunk.maxAttempts,
