@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Repository } from 'typeorm';
+import { IsNull, LessThan, Repository } from 'typeorm';
 
 import { AiService } from '../ai/ai.service';
 import { AIResponse } from '../ai/ai.interface';
@@ -8,6 +8,7 @@ import { Chunk } from './entities/chunk.entity';
 import { Job } from './entities/job.entity';
 
 const STALE_RUNNING_MS = 10 * 60 * 1000;
+const RECOVER_RUNNING_ON_JOB_START_MS = 0;
 const RETRYABLE_FAILURE_MESSAGE =
   'Job has retryable failed chunks; waiting for BullMQ retry';
 const EXHAUSTED_FAILURE_MESSAGE = 'One or more chunks exhausted retry attempts';
@@ -39,9 +40,11 @@ export class AnalysisExecutionService {
    * Runs one analysis pass for a job.
    *
    * BullMQ is the tool that wakes this method up, but database state decides
-   * what still needs work. If retryable chunks failed during this pass, the
-   * method throws after persisting their failed state so BullMQ can schedule
-   * the next pass without losing chunk-level memory.
+   * what still needs work. A fresh BullMQ pass means any already-running chunk
+   * belongs to an earlier interrupted pass, so those chunks are recovered
+   * immediately before selecting processable work. If retryable chunks fail
+   * during this pass, the method throws after persisting their failed state so
+   * BullMQ can schedule the next pass without losing chunk-level memory.
    */
   async runJob(jobId: string): Promise<void> {
     const job = await this.jobRepo.findOne({ where: { id: jobId } });
@@ -51,7 +54,7 @@ export class AnalysisExecutionService {
     }
 
     await this.markJobRunning(job);
-    await this.resetStaleRunningChunks(jobId);
+    await this.resetStaleRunningChunks(jobId, RECOVER_RUNNING_ON_JOB_START_MS);
 
     const chunks = await this.getProcessableChunks(jobId);
     for (const chunk of chunks) {
@@ -78,11 +81,18 @@ export class AnalysisExecutionService {
   ): Promise<number> {
     const staleBefore = new Date(Date.now() - staleAfterMs);
     const staleChunks = await this.chunkRepo.find({
-      where: {
-        job: { id: jobId },
-        status: 'running',
-        startedAt: LessThan(staleBefore),
-      },
+      where: [
+        {
+          job: { id: jobId },
+          status: 'running',
+          startedAt: LessThan(staleBefore),
+        },
+        {
+          job: { id: jobId },
+          status: 'running',
+          startedAt: IsNull(),
+        },
+      ],
       relations: ['job'],
     });
 
