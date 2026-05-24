@@ -1,15 +1,15 @@
 import { Repository } from 'typeorm';
 
 import { AiService } from '../ai/ai.service';
-import { AnalysisExecutionService } from './analysis-execution.service';
+import { Job } from '../jobs/entities/job.entity';
+import { ChunksService } from './chunks.service';
 import { Chunk } from './entities/chunk.entity';
-import { Job } from './entities/job.entity';
 
-describe('AnalysisExecutionService', () => {
+describe('ChunksService', () => {
   let jobRepo: { findOne: jest.Mock; save: jest.Mock };
   let chunkRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock };
   let aiService: { generate: jest.Mock };
-  let service: AnalysisExecutionService;
+  let service: ChunksService;
 
   beforeEach(() => {
     jobRepo = {
@@ -25,7 +25,7 @@ describe('AnalysisExecutionService', () => {
       generate: jest.fn(),
     };
 
-    service = new AnalysisExecutionService(
+    service = new ChunksService(
       jobRepo as unknown as Repository<Job>,
       chunkRepo as unknown as Repository<Chunk>,
       aiService as unknown as AiService,

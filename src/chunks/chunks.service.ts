@@ -4,8 +4,8 @@ import { IsNull, LessThan, Repository } from 'typeorm';
 
 import { AiService } from '../ai/ai.service';
 import { AIResponse } from '../ai/ai.interface';
+import { Job } from '../jobs/entities/job.entity';
 import { Chunk } from './entities/chunk.entity';
-import { Job } from './entities/job.entity';
 
 const STALE_RUNNING_MS = 10 * 60 * 1000;
 const RECOVER_RUNNING_ON_JOB_START_MS = 0;
@@ -19,18 +19,18 @@ interface FinalizedJobState {
 }
 
 /**
- * Coordinates retry-safe analysis execution for persisted jobs and chunks.
+ * Coordinates retry-safe chunk execution and parent-job finalization.
  *
  * Phase 2 mapping:
  * - Workflow: advances chunk summarization steps and finalizes the parent job.
- * - Orchestrator: gives the BullMQ processor chunk-level actions and
- *   event-safe finalization helpers.
+ * - Orchestrator: gives ChunksProcessor chunk-level actions and event-safe
+ *   finalization helpers.
  * - Memory: uses Postgres job/chunk rows as the source of truth.
  * - State Machine: owns chunk and job status transitions.
  * - Guardrails: skips completed chunks and derives job totals from chunks.
  */
 @Injectable()
-export class AnalysisExecutionService {
+export class ChunksService {
   constructor(
     @InjectRepository(Job) private readonly jobRepo: Repository<Job>,
     @InjectRepository(Chunk) private readonly chunkRepo: Repository<Chunk>,
