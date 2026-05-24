@@ -19,11 +19,12 @@ interface FinalizedJobState {
 }
 
 /**
- * Coordinates retry-safe analysis execution for a persisted job.
+ * Coordinates retry-safe analysis execution for persisted jobs and chunks.
  *
  * Phase 2 mapping:
- * - Workflow: advances a job through chunk summarization steps.
- * - Orchestrator: gives the BullMQ processor one clear job-level action.
+ * - Workflow: advances chunk summarization steps and finalizes the parent job.
+ * - Orchestrator: gives the BullMQ processor chunk-level actions and
+ *   event-safe finalization helpers.
  * - Memory: uses Postgres job/chunk rows as the source of truth.
  * - State Machine: owns chunk and job status transitions.
  * - Guardrails: skips completed chunks and derives job totals from chunks.
