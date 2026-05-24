@@ -4,6 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AiModule } from './ai/ai.module';
+import { ChunksModule } from './chunks/chunks.module';
 import { JobsModule } from './jobs/jobs.module';
 
 @Module({
@@ -29,6 +30,7 @@ import { JobsModule } from './jobs/jobs.module';
 
     AiModule,
     JobsModule,
+    ChunksModule,
   ],
 })
 export class AppModule {}
