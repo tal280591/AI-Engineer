@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
 
 import { AiService } from '../ai/ai.service';
 import { AIResponse } from '../ai/ai.interface';
 import { Chunk } from './entities/chunk.entity';
-import { Job, JobStatus } from './entities/job.entity';
+import { Job } from './entities/job.entity';
 
 const STALE_RUNNING_MS = 10 * 60 * 1000;
 const RETRYABLE_FAILURE_MESSAGE =
@@ -77,13 +77,14 @@ export class AnalysisExecutionService {
     staleAfterMs = STALE_RUNNING_MS,
   ): Promise<number> {
     const staleBefore = new Date(Date.now() - staleAfterMs);
-    const staleChunks = await this.chunkRepo
-      .createQueryBuilder('chunk')
-      .leftJoin('chunk.job', 'job')
-      .where('job.id = :jobId', { jobId })
-      .andWhere('chunk.status = :status', { status: 'running' })
-      .andWhere('chunk.startedAt < :staleBefore', { staleBefore })
-      .getMany();
+    const staleChunks = await this.chunkRepo.find({
+      where: {
+        job: { id: jobId },
+        status: 'running',
+        startedAt: LessThan(staleBefore),
+      },
+      relations: ['job'],
+    });
 
     const now = new Date();
     for (const chunk of staleChunks) {
@@ -107,16 +108,19 @@ export class AnalysisExecutionService {
    *   not duplicated during retries.
    */
   async getProcessableChunks(jobId: string): Promise<Chunk[]> {
-    return this.chunkRepo
-      .createQueryBuilder('chunk')
-      .leftJoin('chunk.job', 'job')
-      .where('job.id = :jobId', { jobId })
-      .andWhere(
-        '(chunk.status = :pending OR (chunk.status = :failed AND chunk.attempts < chunk.maxAttempts))',
-        { pending: 'pending', failed: 'failed' },
-      )
-      .orderBy('chunk.index', 'ASC')
-      .getMany();
+    const chunks = await this.chunkRepo.find({
+      where: [
+        { job: { id: jobId }, status: 'pending' },
+        { job: { id: jobId }, status: 'failed' },
+      ],
+      relations: ['job'],
+      order: { index: 'ASC' },
+    });
+
+    return chunks.filter(
+      (chunk) =>
+        chunk.status === 'pending' || chunk.attempts < chunk.maxAttempts,
+    );
   }
 
   /**
