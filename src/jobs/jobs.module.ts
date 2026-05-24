@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 
+import { Chunk } from '../chunks/entities/chunk.entity';
 import { JobsService } from './jobs.service';
 import { JobsController } from './jobs.controller';
 import { Job } from './entities/job.entity';
-import { Chunk } from './entities/chunk.entity';
 import { Idempotency } from './entities/idempotency.entity';
 
 /**
