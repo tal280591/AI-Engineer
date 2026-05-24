@@ -6,9 +6,9 @@ import { Chunk } from './entities/chunk.entity';
 import { Job } from './entities/job.entity';
 
 describe('AnalysisExecutionService', () => {
-  let jobRepo: jest.Mocked<Partial<Repository<Job>>>;
-  let chunkRepo: jest.Mocked<Partial<Repository<Chunk>>>;
-  let aiService: jest.Mocked<Partial<AiService>>;
+  let jobRepo: { findOne: jest.Mock; save: jest.Mock };
+  let chunkRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock };
+  let aiService: { generate: jest.Mock };
   let service: AnalysisExecutionService;
 
   beforeEach(() => {
@@ -26,15 +26,15 @@ describe('AnalysisExecutionService', () => {
     };
 
     service = new AnalysisExecutionService(
-      jobRepo as Repository<Job>,
-      chunkRepo as Repository<Chunk>,
-      aiService as AiService,
+      jobRepo as unknown as Repository<Job>,
+      chunkRepo as unknown as Repository<Chunk>,
+      aiService as unknown as AiService,
     );
   });
 
   it('skips completed chunks without calling the AI provider', async () => {
     const completedChunk = makeChunk({ status: 'completed', summary: 'done' });
-    chunkRepo.findOne?.mockResolvedValue(completedChunk);
+    chunkRepo.findOne.mockResolvedValue(completedChunk);
 
     const result = await service.processChunkSafely(completedChunk.id);
 
@@ -45,8 +45,8 @@ describe('AnalysisExecutionService', () => {
 
   it('stores summary and token usage on the chunk when processing succeeds', async () => {
     const chunk = makeChunk({ status: 'pending', attempts: 0 });
-    chunkRepo.findOne?.mockResolvedValue(chunk);
-    aiService.generate?.mockResolvedValue({
+    chunkRepo.findOne.mockResolvedValue(chunk);
+    aiService.generate.mockResolvedValue({
       content: 'summary',
       inputTokens: 10,
       outputTokens: 4,
@@ -68,8 +68,8 @@ describe('AnalysisExecutionService', () => {
 
   it('marks failed chunks without hiding the provider error', async () => {
     const chunk = makeChunk({ status: 'pending', attempts: 0 });
-    chunkRepo.findOne?.mockResolvedValue(chunk);
-    aiService.generate?.mockRejectedValue(new Error('provider unavailable'));
+    chunkRepo.findOne.mockResolvedValue(chunk);
+    aiService.generate.mockRejectedValue(new Error('provider unavailable'));
 
     const result = await service.processChunkSafely(chunk.id);
 
@@ -94,7 +94,7 @@ describe('AnalysisExecutionService', () => {
       maxAttempts: 3,
     });
     const job = makeJob({ chunks: [retryableFailed, completed] });
-    jobRepo.findOne?.mockResolvedValue(job);
+    jobRepo.findOne.mockResolvedValue(job);
 
     const result = await service.finalizeJobStatus(job.id);
 
@@ -123,7 +123,7 @@ describe('AnalysisExecutionService', () => {
       outputTokens: 3,
     });
     const job = makeJob({ chunks: [second, first] });
-    jobRepo.findOne?.mockResolvedValue(job);
+    jobRepo.findOne.mockResolvedValue(job);
 
     const result = await service.finalizeJobStatus(job.id);
 
@@ -144,7 +144,7 @@ describe('AnalysisExecutionService', () => {
       lastError: 'still failing',
     });
     const job = makeJob({ chunks: [exhausted] });
-    jobRepo.findOne?.mockResolvedValue(job);
+    jobRepo.findOne.mockResolvedValue(job);
 
     const result = await service.finalizeJobStatus(job.id);
 
