@@ -3,10 +3,10 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AiModule } from '../ai/ai.module';
-import { Chunk } from '../jobs/entities/chunk.entity';
 import { Job } from '../jobs/entities/job.entity';
 import { ChunksProcessor } from './chunks.processor';
 import { ChunksService } from './chunks.service';
+import { Chunk } from './entities/chunk.entity';
 
 /**
  * Owns chunk execution infrastructure.
