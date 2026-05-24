@@ -1,5 +1,5 @@
 import { Column, Entity, OneToMany, PrimaryColumn } from 'typeorm';
-import { Chunk } from './chunk.entity';
+import { Chunk } from '../../chunks/entities/chunk.entity';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
