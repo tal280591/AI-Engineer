@@ -68,6 +68,48 @@ export class AnalysisExecutionService {
   }
 
   /**
+   * Processes one BullMQ chunk job and throws when the queue should retry it.
+   *
+   * Phase 2 mapping:
+   * - Tools: aligns BullMQ attempts with one durable chunk unit.
+   * - Memory: the chunk row still decides whether work is safe to run.
+   * - State Machine: a failed result remains failed in Postgres before the
+   *   error is rethrown to BullMQ.
+   * - Guardrails: duplicate queue deliveries become no-ops for completed chunks.
+   */
+  async processQueuedChunk(chunkId: string): Promise<Chunk> {
+    const chunk = await this.processChunkSafely(chunkId);
+
+    if (chunk.status === 'failed') {
+      throw new Error(chunk.lastError ?? `Chunk ${chunk.id} failed`);
+    }
+
+    return chunk;
+  }
+
+  /**
+   * Recalculates the parent job for a chunk-level queue event.
+   *
+   * Phase 2 mapping:
+   * - Orchestrator: lets BullMQ lifecycle listeners finalize the parent job.
+   * - Memory: loads the chunk->job relationship from Postgres.
+   * - Guardrails: finalization still derives status from all chunks, not from
+   *   the queue event alone.
+   */
+  async finalizeJobForChunk(chunkId: string): Promise<FinalizedJobState> {
+    const chunk = await this.chunkRepo.findOne({
+      where: { id: chunkId },
+      relations: ['job'],
+    });
+
+    if (!chunk) {
+      throw new Error(`Chunk ${chunkId} not found`);
+    }
+
+    return this.finalizeJobStatus(chunk.job.id);
+  }
+
+  /**
    * Converts stale running chunks into retryable failed chunks.
    *
    * Phase 2 mapping:
