@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { Job } from './job.entity';
 
 export type ChunkStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -18,7 +18,31 @@ export class Chunk {
   status: ChunkStatus;
 
   @Column({ nullable: true, type: 'text' })
-  summary: string;
+  summary: string | null;
+
+  @Column({ default: 0 })
+  attempts: number;
+
+  @Column({ default: 3 })
+  maxAttempts: number;
+
+  @Column({ nullable: true, type: 'text' })
+  lastError: string | null;
+
+  @Column({ nullable: true, type: 'timestamptz' })
+  startedAt: Date | null;
+
+  @Column({ nullable: true, type: 'timestamptz' })
+  completedAt: Date | null;
+
+  @Column({ nullable: true, type: 'timestamptz' })
+  failedAt: Date | null;
+
+  @Column({ default: 0 })
+  inputTokens: number;
+
+  @Column({ default: 0 })
+  outputTokens: number;
 
   @ManyToOne(() => Job, (job) => job.chunks)
   job: Job;
