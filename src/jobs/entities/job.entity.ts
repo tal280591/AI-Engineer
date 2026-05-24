@@ -29,13 +29,13 @@ export class Job {
   @Column({ nullable: true, type: 'text' })
   lastError: string | null;
 
-  @Column({ nullable: true, type: 'timestamptz' })
+  @Column({ nullable: true, type: 'timestamp' })
   startedAt: Date | null;
 
-  @Column({ nullable: true, type: 'timestamptz' })
+  @Column({ nullable: true, type: 'timestamp' })
   completedAt: Date | null;
 
-  @Column({ nullable: true, type: 'timestamptz' })
+  @Column({ nullable: true, type: 'timestamp' })
   failedAt: Date | null;
 
   @OneToMany(() => Chunk, (chunk) => chunk.job)
