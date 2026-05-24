@@ -1,9 +1,9 @@
 import { Repository } from 'typeorm';
 
 import { AiService } from '../ai/ai.service';
-import { Chunk } from '../jobs/entities/chunk.entity';
 import { Job } from '../jobs/entities/job.entity';
 import { ChunksService } from './chunks.service';
+import { Chunk } from './entities/chunk.entity';
 
 describe('ChunksService', () => {
   let jobRepo: { findOne: jest.Mock; save: jest.Mock };
