@@ -4,8 +4,8 @@ import { IsNull, LessThan, Repository } from 'typeorm';
 
 import { AiService } from '../ai/ai.service';
 import { AIResponse } from '../ai/ai.interface';
-import { Chunk } from '../jobs/entities/chunk.entity';
 import { Job } from '../jobs/entities/job.entity';
+import { Chunk } from './entities/chunk.entity';
 
 const STALE_RUNNING_MS = 10 * 60 * 1000;
 const RECOVER_RUNNING_ON_JOB_START_MS = 0;
