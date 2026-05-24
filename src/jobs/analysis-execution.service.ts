@@ -19,11 +19,12 @@ interface FinalizedJobState {
 }
 
 /**
- * Coordinates retry-safe analysis execution for a persisted job.
+ * Coordinates retry-safe analysis execution for persisted jobs and chunks.
  *
  * Phase 2 mapping:
- * - Workflow: advances a job through chunk summarization steps.
- * - Orchestrator: gives the BullMQ processor one clear job-level action.
+ * - Workflow: advances chunk summarization steps and finalizes the parent job.
+ * - Orchestrator: gives the BullMQ processor chunk-level actions and
+ *   event-safe finalization helpers.
  * - Memory: uses Postgres job/chunk rows as the source of truth.
  * - State Machine: owns chunk and job status transitions.
  * - Guardrails: skips completed chunks and derives job totals from chunks.
@@ -65,6 +66,48 @@ export class AnalysisExecutionService {
     if (finalized.hasRetryableFailures) {
       throw new Error(RETRYABLE_FAILURE_MESSAGE);
     }
+  }
+
+  /**
+   * Processes one BullMQ chunk job and throws when the queue should retry it.
+   *
+   * Phase 2 mapping:
+   * - Tools: aligns BullMQ attempts with one durable chunk unit.
+   * - Memory: the chunk row still decides whether work is safe to run.
+   * - State Machine: a failed result remains failed in Postgres before the
+   *   error is rethrown to BullMQ.
+   * - Guardrails: duplicate queue deliveries become no-ops for completed chunks.
+   */
+  async processQueuedChunk(chunkId: string): Promise<Chunk> {
+    const chunk = await this.processChunkSafely(chunkId);
+
+    if (chunk.status === 'failed') {
+      throw new Error(chunk.lastError ?? `Chunk ${chunk.id} failed`);
+    }
+
+    return chunk;
+  }
+
+  /**
+   * Recalculates the parent job for a chunk-level queue event.
+   *
+   * Phase 2 mapping:
+   * - Orchestrator: lets BullMQ lifecycle listeners finalize the parent job.
+   * - Memory: loads the chunk->job relationship from Postgres.
+   * - Guardrails: finalization still derives status from all chunks, not from
+   *   the queue event alone.
+   */
+  async finalizeJobForChunk(chunkId: string): Promise<FinalizedJobState> {
+    const chunk = await this.chunkRepo.findOne({
+      where: { id: chunkId },
+      relations: ['job'],
+    });
+
+    if (!chunk) {
+      throw new Error(`Chunk ${chunkId} not found`);
+    }
+
+    return this.finalizeJobStatus(chunk.job.id);
   }
 
   /**
@@ -200,9 +243,7 @@ export class AnalysisExecutionService {
     }
 
     const chunks = [...job.chunks].sort((a, b) => a.index - b.index);
-    const completedChunks = chunks.filter(
-      (chunk) => chunk.status === 'completed',
-    );
+    const completedChunks = chunks.filter((chunk) => chunk.status === 'completed');
     const failedChunks = chunks.filter((chunk) => chunk.status === 'failed');
     const hasRetryableFailures = failedChunks.some(
       (chunk) => chunk.attempts < chunk.maxAttempts,
