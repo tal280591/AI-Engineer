@@ -5,8 +5,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 
+import { Chunk } from '../chunks/entities/chunk.entity';
 import { Job } from './entities/job.entity';
-import { Chunk } from './entities/chunk.entity';
 import { Idempotency } from './entities/idempotency.entity';
 
 const DEFAULT_CHUNK_MAX_ATTEMPTS = 3;
