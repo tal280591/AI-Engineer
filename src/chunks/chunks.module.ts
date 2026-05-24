@@ -3,10 +3,10 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AiModule } from '../ai/ai.module';
-import { AnalysisExecutionService } from '../jobs/analysis-execution.service';
 import { Chunk } from '../jobs/entities/chunk.entity';
 import { Job } from '../jobs/entities/job.entity';
 import { ChunksProcessor } from './chunks.processor';
+import { ChunksService } from './chunks.service';
 
 /**
  * Owns chunk execution infrastructure.
@@ -15,7 +15,7 @@ import { ChunksProcessor } from './chunks.processor';
  * - Workflow: executes individual chunk-analysis steps.
  * - Tools: registers the BullMQ analysis queue worker side.
  * - Orchestrator: hosts ChunksProcessor for chunk queue jobs.
- * - Memory: gives the execution service access to Job and Chunk repositories.
+ * - Memory: gives ChunksService access to Job and Chunk repositories.
  */
 @Module({
   imports: [
@@ -23,6 +23,6 @@ import { ChunksProcessor } from './chunks.processor';
     BullModule.registerQueue({ name: 'analysis' }),
     AiModule,
   ],
-  providers: [ChunksProcessor, AnalysisExecutionService],
+  providers: [ChunksProcessor, ChunksService],
 })
 export class ChunksModule {}
