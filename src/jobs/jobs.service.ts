@@ -14,11 +14,17 @@ export class JobsService {
   constructor(
     @InjectQueue('analysis') private queue: Queue,
     @InjectRepository(Job) private jobRepo: Repository<Job>,
-    // @InjectRepository(Chunk) private chunkRepo: Repository<Chunk>,
-    // @InjectRepository(Idempotency)
-    // private idemRepo: Repository<Idempotency>,
   ) {}
 
+  /**
+   * Creates a new analysis job exactly once for an idempotency key.
+   *
+   * Phase 2 mapping:
+   * - Workflow: starts the document analysis pipeline by creating a job and chunks.
+   * - Tools: enqueues BullMQ work after the database transaction commits.
+   * - Memory: stores the idempotency claim before creating the job.
+   * - Guardrails: prevents duplicate POST /jobs requests from creating duplicate jobs.
+   */
   async createJob(
     text: string,
     headers: { idempotencyKey?: string },
@@ -45,7 +51,7 @@ export class JobsService {
         .orIgnore()
         .execute();
 
-      // If ignored, someone else already claimed it → return existing jobId
+      // If ignored, someone else already claimed it -> return existing jobId
       const inserted = (insertRes.identifiers?.length ?? 0) > 0;
 
       if (!inserted) {
@@ -80,7 +86,14 @@ export class JobsService {
 
     // 4) Enqueue after commit, only if new
     if (!result.reused) {
-      await this.queue.add('analyze', { jobId: result.jobId });
+      await this.queue.add(
+        'analyze',
+        { jobId: result.jobId },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+        },
+      );
     }
 
     return result;
