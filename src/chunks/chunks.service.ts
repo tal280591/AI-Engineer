@@ -177,16 +177,18 @@ export class ChunksService {
   }
 
   /**
-   * Processes one chunk only after atomically claiming it in Postgres.
+   * Processes one chunk only after recovering stale state and claiming it.
    *
    * Phase 2 mapping:
    * - Tools: calls the configured AI provider only after the DB claim succeeds.
-   * - Memory: Postgres performs the check and status transition together.
-   * - State Machine: pending/failed -> running is a single atomic transition.
+   * - Memory: Postgres performs stale recovery and claiming from durable state.
+   * - State Machine: running(stale) -> failed, then pending/failed -> running.
    * - Guardrails: duplicate workers that do not receive a claimed row become
    *   no-ops, so they do not call the provider or duplicate token usage.
    */
   async processChunkSafely(chunkId: string): Promise<Chunk> {
+    await this.recoverStaleRunningChunk(chunkId);
+
     const chunk = await this.claimChunkForProcessing(chunkId);
 
     if (!chunk) {
@@ -261,6 +263,37 @@ export class ChunksService {
 
     await this.jobRepo.save(job);
     return { job, hasRetryableFailures };
+  }
+
+  /**
+   * Converts this chunk from stale running to failed before claiming.
+   *
+   * Phase 2 mapping:
+   * - Memory: startedAt tells us whether a running owner is too old to trust.
+   * - State Machine: running(stale) moves to failed before normal retry logic.
+   * - Guardrails: fresh running chunks are left alone, so active workers are not
+   *   interrupted by duplicate deliveries.
+   */
+  private async recoverStaleRunningChunk(
+    chunkId: string,
+    staleAfterMs = STALE_RUNNING_MS,
+  ): Promise<void> {
+    const staleBefore = new Date(Date.now() - staleAfterMs);
+
+    await this.chunkRepo
+      .createQueryBuilder()
+      .update(Chunk)
+      .set({
+        status: 'failed',
+        failedAt: new Date(),
+        lastError: `Chunk was running for more than ${staleAfterMs}ms and was reset for retry`,
+      })
+      .where('id = :chunkId', { chunkId })
+      .andWhere('status = :status', { status: 'running' })
+      .andWhere('("startedAt" < :staleBefore OR "startedAt" IS NULL)', {
+        staleBefore,
+      })
+      .execute();
   }
 
   /**
