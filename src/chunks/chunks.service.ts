@@ -177,39 +177,21 @@ export class ChunksService {
   }
 
   /**
-   * Processes one chunk with idempotent state checks around the provider call.
+   * Processes one chunk only after atomically claiming it in Postgres.
    *
    * Phase 2 mapping:
-   * - Tools: calls the configured AI provider.
-   * - Memory: stores attempts, errors, summary, and token usage on the chunk.
-   * - State Machine: pending/failed -> running -> completed or failed.
-   * - Guardrails: completed chunks are no-ops, and token usage is stored once
-   *   beside the chunk output instead of incrementing job totals directly.
+   * - Tools: calls the configured AI provider only after the DB claim succeeds.
+   * - Memory: Postgres performs the check and status transition together.
+   * - State Machine: pending/failed -> running is a single atomic transition.
+   * - Guardrails: duplicate workers that do not receive a claimed row become
+   *   no-ops, so they do not call the provider or duplicate token usage.
    */
   async processChunkSafely(chunkId: string): Promise<Chunk> {
-    const chunk = await this.chunkRepo.findOne({
-      where: { id: chunkId },
-      relations: ['job'],
-    });
+    const chunk = await this.claimChunkForProcessing(chunkId);
 
     if (!chunk) {
-      throw new Error(`Chunk ${chunkId} not found`);
+      return this.getChunkAfterMissedClaim(chunkId);
     }
-
-    if (chunk.status === 'completed') {
-      return chunk;
-    }
-
-    if (chunk.status === 'failed' && chunk.attempts >= chunk.maxAttempts) {
-      return chunk;
-    }
-
-    chunk.status = 'running';
-    chunk.attempts += 1;
-    chunk.startedAt = new Date();
-    chunk.failedAt = null;
-    chunk.lastError = null;
-    await this.chunkRepo.save(chunk);
 
     try {
       const response = await this.aiService.generate({
@@ -279,6 +261,59 @@ export class ChunksService {
 
     await this.jobRepo.save(job);
     return { job, hasRetryableFailures };
+  }
+
+  /**
+   * Atomically claims a retryable chunk for one worker.
+   *
+   * Phase 2 mapping:
+   * - Memory: the database combines eligibility checking and claiming.
+   * - State Machine: only pending/failed chunks with attempts left can move to
+   *   running.
+   * - Guardrails: if another worker already changed the row, RETURNING yields
+   *   no chunk and the caller must not process provider work.
+   */
+  private async claimChunkForProcessing(chunkId: string): Promise<Chunk | null> {
+    const result = await this.chunkRepo
+      .createQueryBuilder()
+      .update(Chunk)
+      .set({
+        status: 'running',
+        attempts: () => '"attempts" + 1',
+        startedAt: new Date(),
+        failedAt: null,
+        lastError: null,
+      })
+      .where('id = :chunkId', { chunkId })
+      .andWhere('status IN (:...statuses)', {
+        statuses: ['pending', 'failed'],
+      })
+      .andWhere('attempts < "maxAttempts"')
+      .returning('*')
+      .execute();
+
+    return (result.raw[0] as Chunk | undefined) ?? null;
+  }
+
+  /**
+   * Loads the current chunk state when this worker did not win the claim.
+   *
+   * Phase 2 mapping:
+   * - Memory: returns the durable state that prevented claiming.
+   * - Guardrails: completed, exhausted, or already-running chunks become safe
+   *   no-ops for this worker.
+   */
+  private async getChunkAfterMissedClaim(chunkId: string): Promise<Chunk> {
+    const chunk = await this.chunkRepo.findOne({
+      where: { id: chunkId },
+      relations: ['job'],
+    });
+
+    if (!chunk) {
+      throw new Error(`Chunk ${chunkId} not found`);
+    }
+
+    return chunk;
   }
 
   private async markJobRunning(job: Job): Promise<Job> {
