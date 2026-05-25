@@ -5,6 +5,15 @@ import { Job } from '../jobs/entities/job.entity';
 import { ChunksService } from './chunks.service';
 import { Chunk } from './entities/chunk.entity';
 
+interface UpdateQueryBuilderMock {
+  update: jest.Mock;
+  set: jest.Mock;
+  where: jest.Mock;
+  andWhere: jest.Mock;
+  returning: jest.Mock;
+  execute: jest.Mock;
+}
+
 describe('ChunksService', () => {
   let jobRepo: { findOne: jest.Mock; save: jest.Mock };
   let chunkRepo: {
@@ -13,14 +22,9 @@ describe('ChunksService', () => {
     save: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
-  let claimQueryBuilder: {
-    update: jest.Mock;
-    set: jest.Mock;
-    where: jest.Mock;
-    andWhere: jest.Mock;
-    returning: jest.Mock;
-    execute: jest.Mock;
-  };
+  let staleRecoveryQueryBuilder: UpdateQueryBuilderMock;
+  let claimQueryBuilder: UpdateQueryBuilderMock;
+  let updateQueryBuilders: UpdateQueryBuilderMock[];
   let aiService: { generate: jest.Mock };
   let service: ChunksService;
 
@@ -29,25 +33,20 @@ describe('ChunksService', () => {
       findOne: jest.fn(),
       save: jest.fn((job: Job) => job),
     };
-    claimQueryBuilder = {
-      update: jest.fn(),
-      set: jest.fn(),
-      where: jest.fn(),
-      andWhere: jest.fn(),
-      returning: jest.fn(),
-      execute: jest.fn(),
-    };
-    claimQueryBuilder.update.mockReturnValue(claimQueryBuilder);
-    claimQueryBuilder.set.mockReturnValue(claimQueryBuilder);
-    claimQueryBuilder.where.mockReturnValue(claimQueryBuilder);
-    claimQueryBuilder.andWhere.mockReturnValue(claimQueryBuilder);
-    claimQueryBuilder.returning.mockReturnValue(claimQueryBuilder);
+    staleRecoveryQueryBuilder = makeUpdateQueryBuilderMock();
+    claimQueryBuilder = makeUpdateQueryBuilderMock();
+    updateQueryBuilders = [staleRecoveryQueryBuilder, claimQueryBuilder];
+
+    staleRecoveryQueryBuilder.execute.mockResolvedValue({ affected: 0 });
+    claimQueryBuilder.execute.mockResolvedValue({ raw: [] });
 
     chunkRepo = {
       find: jest.fn(),
       findOne: jest.fn(),
       save: jest.fn((chunk: Chunk) => chunk),
-      createQueryBuilder: jest.fn(() => claimQueryBuilder),
+      createQueryBuilder: jest.fn(
+        () => updateQueryBuilders.shift() ?? claimQueryBuilder,
+      ),
     };
     aiService = {
       generate: jest.fn(),
@@ -70,6 +69,40 @@ describe('ChunksService', () => {
     expect(result).toBe(completedChunk);
     expect(aiService.generate).not.toHaveBeenCalled();
     expect(chunkRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('recovers stale running chunk state before claiming work', async () => {
+    const chunk = makeChunk({ status: 'running', attempts: 2 });
+    mockClaimedChunk(chunk);
+    aiService.generate.mockResolvedValue({
+      content: 'summary',
+      inputTokens: 10,
+      outputTokens: 4,
+    });
+
+    await service.processChunkSafely(chunk.id);
+
+    expect(staleRecoveryQueryBuilder.set).toHaveBeenCalledWith({
+      status: 'failed',
+      failedAt: expect.any(Date),
+      lastError: expect.stringContaining('reset for retry'),
+    });
+    expect(staleRecoveryQueryBuilder.where).toHaveBeenCalledWith(
+      'id = :chunkId',
+      { chunkId: chunk.id },
+    );
+    expect(staleRecoveryQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'status = :status',
+      { status: 'running' },
+    );
+    expect(staleRecoveryQueryBuilder.andWhere).toHaveBeenCalledWith(
+      '("startedAt" < :staleBefore OR "startedAt" IS NULL)',
+      { staleBefore: expect.any(Date) },
+    );
+    expect(staleRecoveryQueryBuilder.execute).toHaveBeenCalledTimes(1);
+    expect(
+      staleRecoveryQueryBuilder.execute.mock.invocationCallOrder[0],
+    ).toBeLessThan(claimQueryBuilder.execute.mock.invocationCallOrder[0]);
   });
 
   it('claims pending chunks atomically before calling the AI provider', async () => {
@@ -270,6 +303,25 @@ describe('ChunksService', () => {
     claimQueryBuilder.execute.mockResolvedValue({ raw: [] });
   }
 });
+
+function makeUpdateQueryBuilderMock(): UpdateQueryBuilderMock {
+  const queryBuilder = {
+    update: jest.fn(),
+    set: jest.fn(),
+    where: jest.fn(),
+    andWhere: jest.fn(),
+    returning: jest.fn(),
+    execute: jest.fn(),
+  };
+
+  queryBuilder.update.mockReturnValue(queryBuilder);
+  queryBuilder.set.mockReturnValue(queryBuilder);
+  queryBuilder.where.mockReturnValue(queryBuilder);
+  queryBuilder.andWhere.mockReturnValue(queryBuilder);
+  queryBuilder.returning.mockReturnValue(queryBuilder);
+
+  return queryBuilder;
+}
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
