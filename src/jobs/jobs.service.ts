@@ -144,12 +144,24 @@ export class JobsService {
         name: CHUNK_QUEUE_JOB_NAME,
         data: { jobId: chunk.jobId, chunkId: chunk.chunkId },
         opts: {
-          jobId: `chunk:${chunk.chunkId}`,
+          jobId: this.buildChunkQueueJobId(chunk.chunkId),
           attempts: chunk.maxAttempts,
           backoff: { type: 'exponential', delay: 1000 },
         },
       })),
     );
+  }
+
+  /**
+   * Builds a stable BullMQ custom job id for one chunk.
+   *
+   * Phase 2 mapping:
+   * - Tools: BullMQ uses this id to avoid duplicate queue entries.
+   * - Guardrails: avoids ':' because BullMQ reserves it internally and rejects
+   *   custom ids that contain that character.
+   */
+  private buildChunkQueueJobId(chunkId: string): string {
+    return `chunk-${chunkId}`;
   }
 
   private chunkText(text: string, size: number): string[] {
