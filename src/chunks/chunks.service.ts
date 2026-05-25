@@ -292,7 +292,24 @@ export class ChunksService {
       .returning('*')
       .execute();
 
-    return (result.raw[0] as Chunk | undefined) ?? null;
+    return this.getReturnedChunk(result.raw as unknown);
+  }
+
+  /**
+   * Safely extracts the first returned row from TypeORM's untyped raw result.
+   *
+   * Phase 2 mapping:
+   * - Memory: normalizes the database result into a typed chunk entity shape.
+   * - Guardrails: treats malformed or empty RETURNING results as a missed claim
+   *   instead of indexing into an unsafe any value.
+   */
+  private getReturnedChunk(rawResult: unknown): Chunk | null {
+    if (!Array.isArray(rawResult) || rawResult.length === 0) {
+      return null;
+    }
+
+    const [firstRow] = rawResult as unknown[];
+    return firstRow ? (firstRow as Chunk) : null;
   }
 
   /**
