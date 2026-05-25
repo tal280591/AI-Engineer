@@ -7,7 +7,20 @@ import { Chunk } from './entities/chunk.entity';
 
 describe('ChunksService', () => {
   let jobRepo: { findOne: jest.Mock; save: jest.Mock };
-  let chunkRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock };
+  let chunkRepo: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    save: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
+  let claimQueryBuilder: {
+    update: jest.Mock;
+    set: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    returning: jest.Mock;
+    execute: jest.Mock;
+  };
   let aiService: { generate: jest.Mock };
   let service: ChunksService;
 
@@ -16,10 +29,25 @@ describe('ChunksService', () => {
       findOne: jest.fn(),
       save: jest.fn((job: Job) => job),
     };
+    claimQueryBuilder = {
+      update: jest.fn(),
+      set: jest.fn(),
+      where: jest.fn(),
+      andWhere: jest.fn(),
+      returning: jest.fn(),
+      execute: jest.fn(),
+    };
+    claimQueryBuilder.update.mockReturnValue(claimQueryBuilder);
+    claimQueryBuilder.set.mockReturnValue(claimQueryBuilder);
+    claimQueryBuilder.where.mockReturnValue(claimQueryBuilder);
+    claimQueryBuilder.andWhere.mockReturnValue(claimQueryBuilder);
+    claimQueryBuilder.returning.mockReturnValue(claimQueryBuilder);
+
     chunkRepo = {
       find: jest.fn(),
       findOne: jest.fn(),
       save: jest.fn((chunk: Chunk) => chunk),
+      createQueryBuilder: jest.fn(() => claimQueryBuilder),
     };
     aiService = {
       generate: jest.fn(),
@@ -34,6 +62,7 @@ describe('ChunksService', () => {
 
   it('skips completed chunks without calling the AI provider', async () => {
     const completedChunk = makeChunk({ status: 'completed', summary: 'done' });
+    mockMissedClaim();
     chunkRepo.findOne.mockResolvedValue(completedChunk);
 
     const result = await service.processChunkSafely(completedChunk.id);
@@ -43,9 +72,53 @@ describe('ChunksService', () => {
     expect(chunkRepo.save).not.toHaveBeenCalled();
   });
 
+  it('claims pending chunks atomically before calling the AI provider', async () => {
+    const chunk = makeChunk({ status: 'running', attempts: 1 });
+    mockClaimedChunk(chunk);
+    aiService.generate.mockResolvedValue({
+      content: 'summary',
+      inputTokens: 10,
+      outputTokens: 4,
+    });
+
+    await service.processChunkSafely(chunk.id);
+
+    expect(claimQueryBuilder.set).toHaveBeenCalledWith({
+      status: 'running',
+      attempts: expect.any(Function),
+      startedAt: expect.any(Date),
+      failedAt: null,
+      lastError: null,
+    });
+    expect(claimQueryBuilder.where).toHaveBeenCalledWith('id = :chunkId', {
+      chunkId: chunk.id,
+    });
+    expect(claimQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'status IN (:...statuses)',
+      { statuses: ['pending', 'failed'] },
+    );
+    expect(claimQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'attempts < "maxAttempts"',
+    );
+    expect(claimQueryBuilder.returning).toHaveBeenCalledWith('*');
+    expect(aiService.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call the AI provider when another worker already claimed the chunk', async () => {
+    const runningChunk = makeChunk({ status: 'running', attempts: 1 });
+    mockMissedClaim();
+    chunkRepo.findOne.mockResolvedValue(runningChunk);
+
+    const result = await service.processChunkSafely(runningChunk.id);
+
+    expect(result).toBe(runningChunk);
+    expect(aiService.generate).not.toHaveBeenCalled();
+    expect(chunkRepo.save).not.toHaveBeenCalled();
+  });
+
   it('stores summary and token usage on the chunk when processing succeeds', async () => {
-    const chunk = makeChunk({ status: 'pending', attempts: 0 });
-    chunkRepo.findOne.mockResolvedValue(chunk);
+    const chunk = makeChunk({ status: 'running', attempts: 1 });
+    mockClaimedChunk(chunk);
     aiService.generate.mockResolvedValue({
       content: 'summary',
       inputTokens: 10,
@@ -67,8 +140,8 @@ describe('ChunksService', () => {
   });
 
   it('marks failed chunks without hiding the provider error', async () => {
-    const chunk = makeChunk({ status: 'pending', attempts: 0 });
-    chunkRepo.findOne.mockResolvedValue(chunk);
+    const chunk = makeChunk({ status: 'running', attempts: 1 });
+    mockClaimedChunk(chunk);
     aiService.generate.mockRejectedValue(new Error('provider unavailable'));
 
     const result = await service.processChunkSafely(chunk.id);
@@ -80,8 +153,8 @@ describe('ChunksService', () => {
   });
 
   it('throws failed queued chunks back to BullMQ after persisting state', async () => {
-    const chunk = makeChunk({ status: 'pending', attempts: 0 });
-    chunkRepo.findOne.mockResolvedValue(chunk);
+    const chunk = makeChunk({ status: 'running', attempts: 1 });
+    mockClaimedChunk(chunk);
     aiService.generate.mockRejectedValue(new Error('provider unavailable'));
 
     await expect(service.processQueuedChunk(chunk.id)).rejects.toThrow(
@@ -188,6 +261,14 @@ describe('ChunksService', () => {
     expect(job.lastError).toContain('exhausted retry attempts');
     expect(job.failedAt).toBeInstanceOf(Date);
   });
+
+  function mockClaimedChunk(chunk: Chunk): void {
+    claimQueryBuilder.execute.mockResolvedValue({ raw: [chunk] });
+  }
+
+  function mockMissedClaim(): void {
+    claimQueryBuilder.execute.mockResolvedValue({ raw: [] });
+  }
 });
 
 function makeJob(overrides: Partial<Job> = {}): Job {
