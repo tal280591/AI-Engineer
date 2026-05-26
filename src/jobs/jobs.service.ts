@@ -96,7 +96,7 @@ export class JobsService {
         await manager.save(job);
 
         // 3) Create chunks
-        const chunks = this.chunkText(text, 3000);
+        const chunks = this.chunkText(text, 100);
         const chunksToEnqueue: CreatedChunkJob[] = [];
         for (let i = 0; i < chunks.length; i++) {
           const chunk = manager.create(Chunk, {

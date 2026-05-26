@@ -250,7 +250,7 @@ export class ChunksService {
     );
 
     if (chunks.length === completedChunks.length) {
-      this.applyCompletedJobState(job, chunks);
+      await this.applyCompletedJobState(job, chunks);
     } else if (hasExhaustedFailures) {
       this.applyFailedJobState(job, EXHAUSTED_FAILURE_MESSAGE);
     } else {
@@ -306,7 +306,9 @@ export class ChunksService {
    * - Guardrails: if another worker already changed the row, RETURNING yields
    *   no chunk and the caller must not process provider work.
    */
-  private async claimChunkForProcessing(chunkId: string): Promise<Chunk | null> {
+  private async claimChunkForProcessing(
+    chunkId: string,
+  ): Promise<Chunk | null> {
     const result = await this.chunkRepo
       .createQueryBuilder()
       .update(Chunk)
@@ -396,9 +398,24 @@ export class ChunksService {
     return this.chunkRepo.save(chunk);
   }
 
-  private applyCompletedJobState(job: Job, chunks: Chunk[]): void {
+  private async applyCompletedJobState(
+    job: Job,
+    chunks: Chunk[],
+  ): Promise<void> {
+    const chunkSummaries = chunks
+      .map((chunk) => chunk.summary)
+      .filter((summary): summary is string => Boolean(summary))
+      .join('\n\n');
+
+    const response = await this.aiService.generate({
+      prompt: `Create one coherent overall summary of the document from these chunk summaries:\n\n${chunkSummaries}`,
+      maxTokens: 500,
+    });
+
     job.status = 'completed';
-    job.finalSummary = chunks.map((chunk) => chunk.summary ?? '').join('\n');
+    job.finalSummary = response.content;
+    job.totalInputTokens += response.inputTokens;
+    job.totalOutputTokens += response.outputTokens;
     job.completedAt = new Date();
     job.failedAt = null;
     job.lastError = null;
